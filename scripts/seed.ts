@@ -29,6 +29,12 @@ async function main() {
       const { error } = await admin.storage.createBucket("reports", { public: false });
       if (error && !error.message.includes("already exists")) throw error;
     }
+    // Public bucket for company logos.
+    const { data: logos } = await admin.storage.getBucket("logos");
+    if (!logos) {
+      const { error } = await admin.storage.createBucket("logos", { public: true });
+      if (error && !error.message.includes("already exists")) throw error;
+    }
   } else {
     console.warn("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing — skipped bucket creation.");
   }

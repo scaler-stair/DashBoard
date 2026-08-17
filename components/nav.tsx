@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { orgInitials, orgLogoSrc } from "@/lib/logos";
 
 const LINKS = [
   { href: "/", label: "Dashboard" },
@@ -15,18 +16,21 @@ const LINKS = [
 export function Nav({
   userName,
   orgName,
+  orgLogo,
   role,
   orgs,
   activeOrg,
 }: {
   userName: string;
   orgName: string;
+  orgLogo?: string | null;
   role: string;
   orgs: Array<{ id: number; name: string }>;
   activeOrg: number | null;
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const logo = orgLogoSrc(orgName, orgLogo);
 
   const visible = LINKS.filter(
     (l) => l.href !== "/admin" || role === "super_admin" || role === "client_admin"
@@ -50,7 +54,24 @@ export function Nav({
   return (
     <header className="border-b" style={{ background: "var(--surface-1)", borderColor: "var(--border)" }}>
       <div className="mx-auto max-w-6xl px-4 flex items-center gap-6 h-14">
-        <span className="font-semibold text-sm">{orgName}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          {logo ? (
+            /* eslint-disable-next-line @next/next/no-img-element -- logo URLs are user-supplied (Supabase Storage), not a fixed remote host */
+            <img
+              src={logo}
+              alt={`${orgName} logo`}
+              className="h-7 w-auto max-w-28 object-contain rounded-md"
+            />
+          ) : (
+            <span
+              className="h-7 w-7 rounded-md grid place-items-center text-[11px] font-semibold text-white"
+              style={{ background: "var(--accent)" }}
+            >
+              {orgInitials(orgName)}
+            </span>
+          )}
+          <span className="font-semibold text-sm">{orgName}</span>
+        </div>
         <nav className="flex gap-1 text-sm flex-1">
           {visible.map((l) => (
             <Link

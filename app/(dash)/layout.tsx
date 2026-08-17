@@ -9,7 +9,7 @@ export default async function DashLayout({ children }: { children: React.ReactNo
 
   const orgId = await activeOrgId(session);
   const sql = getSql();
-  const orgRows = orgId ? await sql`SELECT name FROM orgs WHERE id = ${orgId}` : [];
+  const orgRows = orgId ? await sql`SELECT name, logo_url FROM orgs WHERE id = ${orgId}` : [];
   const orgs =
     session.role === "super_admin"
       ? ((await sql`SELECT id, name FROM orgs ORDER BY name`) as unknown as Array<{ id: number; name: string }>)
@@ -20,6 +20,7 @@ export default async function DashLayout({ children }: { children: React.ReactNo
       <Nav
         userName={session.name}
         orgName={(orgRows[0]?.name as string) ?? session.orgName ?? "No organization"}
+        orgLogo={(orgRows[0]?.logo_url as string | null) ?? null}
         role={session.role}
         orgs={orgs}
         activeOrg={orgId}

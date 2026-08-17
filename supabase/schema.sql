@@ -7,8 +7,12 @@ create table if not exists orgs (
   id integer generated always as identity primary key,
   name text not null unique,
   slug text not null unique,
+  logo_url text,
   created_at timestamptz not null default now()
 );
+
+-- Backfill for databases created before company logos existed.
+alter table orgs add column if not exists logo_url text;
 
 create table if not exists users (
   id integer generated always as identity primary key,

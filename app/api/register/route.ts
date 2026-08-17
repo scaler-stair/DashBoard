@@ -2,15 +2,41 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getSql } from "@/lib/db";
 import { createSessionToken } from "@/lib/auth";
+import { uploadLogo } from "@/lib/storage";
+import { logoError } from "@/lib/logos";
 
-/** Public sign-up: creates a company (org) plus its first client_admin account and signs them in. */
+/**
+ * Public sign-up: creates a company (org) plus its first client_admin account and signs them in.
+ * Accepts JSON, or multipart/form-data when the company also uploads a logo.
+ */
 export async function POST(req: NextRequest) {
-  const { company, name, email, password } = (await req.json()) as {
-    company?: string;
-    name?: string;
-    email?: string;
-    password?: string;
-  };
+  let company: string | undefined;
+  let name: string | undefined;
+  let email: string | undefined;
+  let password: string | undefined;
+  let logo: File | null = null;
+
+  if (req.headers.get("content-type")?.includes("multipart/form-data")) {
+    const form = await req.formData();
+    company = form.get("company")?.toString();
+    name = form.get("name")?.toString();
+    email = form.get("email")?.toString();
+    password = form.get("password")?.toString();
+    const candidate = form.get("logo");
+    if (candidate instanceof File && candidate.size > 0) logo = candidate;
+  } else {
+    ({ company, name, email, password } = (await req.json()) as {
+      company?: string;
+      name?: string;
+      email?: string;
+      password?: string;
+    });
+  }
+
+  if (logo) {
+    const bad = logoError(logo);
+    if (bad) return NextResponse.json({ error: bad }, { status: 400 });
+  }
 
   if (!company?.trim() || !name?.trim() || !email?.trim()) {
     return NextResponse.json({ error: "Company name, your name, and email are required" }, { status: 400 });
@@ -36,6 +62,12 @@ export async function POST(req: NextRequest) {
         RETURNING id`;
       return { orgId: org.id, orgName: org.name, userId: (userRows[0] as { id: number }).id };
     });
+
+    // After the org exists, so a failed sign-up can never overwrite another company's logo.
+    if (logo) {
+      const logoUrl = await uploadLogo(slug, logo);
+      if (logoUrl) await sql`UPDATE orgs SET logo_url = ${logoUrl} WHERE id = ${result.orgId}`;
+    }
 
     const token = await createSessionToken({
       userId: result.userId,

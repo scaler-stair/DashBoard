@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Protean">
+  <title>Protean</title>
+  <defs>
+    <linearGradient id="proteanBrand" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#6b0fd6"/>
+      <stop offset="0.5" stop-color="#3a2ce4"/>
+      <stop offset="1" stop-color="#1f56ef"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="64" height="64" rx="15" fill="url(#proteanBrand)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round">
+    <path d="M24 19 V48"/>
+    <circle cx="31" cy="27" r="9.5"/>
+  </g>
+</svg>

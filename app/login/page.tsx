@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LOGO_ACCEPT, logoError } from "@/lib/logos";
 
 type Mode = "signin" | "register";
 
@@ -12,12 +13,39 @@ export default function LoginPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [logo, setLogo] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const logoInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!logo) {
+      setLogoPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(logo);
+    setLogoPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [logo]);
 
   function switchMode(next: Mode) {
     setMode(next);
     setError("");
+  }
+
+  function pickLogo(file: File | null) {
+    if (!file) {
+      setLogo(null);
+      return;
+    }
+    const bad = logoError(file);
+    if (bad) {
+      setError(bad);
+      return;
+    }
+    setError("");
+    setLogo(file);
   }
 
   async function submit(e: React.FormEvent) {
@@ -25,11 +53,22 @@ export default function LoginPage() {
     setBusy(true);
     setError("");
     const isRegister = mode === "register";
-    const res = await fetch(isRegister ? "/api/register" : "/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(isRegister ? { company, name, email, password } : { email, password }),
-    });
+    let res: Response;
+    if (isRegister) {
+      const form = new FormData();
+      form.append("company", company);
+      form.append("name", name);
+      form.append("email", email);
+      form.append("password", password);
+      if (logo) form.append("logo", logo);
+      res = await fetch("/api/register", { method: "POST", body: form });
+    } else {
+      res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+    }
     setBusy(false);
     if (res.ok) {
       router.push("/");
@@ -85,6 +124,58 @@ export default function LoginPage() {
                   placeholder="e.g. Gaja Capital"
                   autoFocus
                 />
+              </div>
+              <div>
+                <label className="block text-sm mb-1" style={label}>
+                  Company logo <span style={{ color: "var(--muted)" }}>(optional)</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <div
+                    className="h-12 w-12 shrink-0 rounded-lg border grid place-items-center overflow-hidden"
+                    style={{ borderColor: "var(--grid)", background: "var(--page)" }}
+                  >
+                    {logoPreview ? (
+                      /* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */
+                      <img src={logoPreview} alt="Logo preview" className="h-full w-full object-contain" />
+                    ) : (
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="var(--muted)" strokeWidth="1.7">
+                        <rect x="3" y="4" width="18" height="16" rx="3" />
+                        <circle cx="9" cy="10" r="1.6" />
+                        <path d="M4.5 18l4.8-4.8 3.2 3.2 2.6-2.4 4.4 4" strokeLinecap="round" />
+                      </svg>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <input
+                      ref={logoInput}
+                      type="file"
+                      accept={LOGO_ACCEPT}
+                      className="hidden"
+                      onChange={(e) => pickLogo(e.target.files?.[0] ?? null)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => logoInput.current?.click()}
+                      className="rounded-lg border px-3 py-1.5 text-sm font-medium"
+                      style={{ borderColor: "var(--accent)", color: "var(--accent)" }}
+                    >
+                      {logo ? "Change logo" : "Upload logo"}
+                    </button>
+                    <p className="mt-1 text-xs truncate" style={{ color: "var(--muted)" }}>
+                      {logo ? logo.name : "PNG, JPG, SVG or WebP · up to 2 MB"}
+                    </p>
+                  </div>
+                  {logo && (
+                    <button
+                      type="button"
+                      onClick={() => setLogo(null)}
+                      className="text-xs underline shrink-0"
+                      style={{ color: "var(--muted)" }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-sm mb-1" style={label}>Your name</label>
