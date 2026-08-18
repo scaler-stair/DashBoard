@@ -52,8 +52,14 @@ create table if not exists observations (
   status text not null default 'Open' check (status in ('Open','In Progress','Closed')),
   owner text,
   due_date text,
+  source_page integer,
+  source_quote text,
   created_at timestamptz not null default now()
 );
+
+-- Backfill for databases created before source citations existed.
+alter table observations add column if not exists source_page integer;
+alter table observations add column if not exists source_quote text;
 
 create table if not exists chunks (
   id integer generated always as identity primary key,

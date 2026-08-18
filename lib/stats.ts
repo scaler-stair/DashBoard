@@ -12,8 +12,11 @@ export type ObservationRow = {
   status: "Open" | "In Progress" | "Closed";
   owner: string | null;
   due_date: string | null;
+  source_page: number | null;
+  source_quote: string | null;
   quarter: string;
   fiscal_year: string;
+  report_title: string;
 };
 
 export async function orgObservations(orgId: number): Promise<ObservationRow[]> {
@@ -21,7 +24,8 @@ export async function orgObservations(orgId: number): Promise<ObservationRow[]> 
   const rows = await sql`
     SELECT o.id, o.report_id, o.title, o.description, o.department, o.risk,
            o.recommendation, o.management_response, o.status, o.owner, o.due_date,
-           r.quarter, r.fiscal_year
+           o.source_page, o.source_quote,
+           r.quarter, r.fiscal_year, r.title AS report_title
     FROM observations o JOIN reports r ON r.id = o.report_id
     WHERE o.org_id = ${orgId} AND r.status = 'ready'
     ORDER BY r.fiscal_year, r.quarter, o.id`;

@@ -35,6 +35,13 @@ export async function signedPdfUrl(pathKey: string): Promise<string> {
   return data.signedUrl;
 }
 
+/** Raw PDF bytes, for server-side re-processing and for streaming to the viewer. */
+export async function downloadPdf(pathKey: string): Promise<Buffer> {
+  const { data, error } = await supabaseAdmin().storage.from(REPORTS_BUCKET).download(pathKey);
+  if (error || !data) throw new Error(`Could not read PDF from storage: ${error?.message}`);
+  return Buffer.from(await data.arrayBuffer());
+}
+
 export async function deletePdf(pathKey: string): Promise<void> {
   await supabaseAdmin().storage.from(REPORTS_BUCKET).remove([pathKey]);
 }

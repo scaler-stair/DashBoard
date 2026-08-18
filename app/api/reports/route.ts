@@ -74,10 +74,12 @@ export async function POST(req: NextRequest) {
     for (const o of result.observations) {
       const risk = ["High", "Medium", "Low"].includes(o.risk) ? o.risk : "Medium";
       const status = ["Open", "In Progress", "Closed"].includes(o.status) ? o.status : "Open";
+      const sourcePage = Number.isInteger(o.source_page) && o.source_page > 0 ? o.source_page : null;
       const r = await sql`
-        INSERT INTO observations (org_id, report_id, title, description, department, risk, recommendation, management_response, status, owner, due_date)
+        INSERT INTO observations (org_id, report_id, title, description, department, risk, recommendation, management_response, status, owner, due_date, source_page, source_quote)
         VALUES (${orgId}, ${reportId}, ${o.title}, ${o.description ?? ""}, ${o.department ?? "General"}, ${risk},
-                ${o.recommendation ?? ""}, ${o.management_response ?? ""}, ${status}, ${o.owner ?? ""}, ${o.due_date ?? ""})
+                ${o.recommendation ?? ""}, ${o.management_response ?? ""}, ${status}, ${o.owner ?? ""}, ${o.due_date ?? ""},
+                ${sourcePage}, ${o.source_quote ?? ""})
         RETURNING id`;
       obsIds.push(r[0].id as number);
       texts.push(`${o.title}. ${o.description ?? ""} Recommendation: ${o.recommendation ?? ""}`);

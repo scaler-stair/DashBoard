@@ -13,22 +13,42 @@ function apiKey(): string {
   return key;
 }
 
-const RETRY_DELAYS_MS = [2000, 8000, 20000];
+const RETRY_DELAYS_MS = [2000, 8000, 20000, 45000, 90000];
+const MAX_RETRY_WAIT_MS = 120000;
+
+/** Quota errors carry their own "Please retry in 37.06s" hint; obey it. */
+function retryAfterMs(body: string): number | null {
+  const seconds = body.match(/retry in ([\d.]+)s/i);
+  if (!seconds) return null;
+  const ms = Math.ceil(Number(seconds[1]) * 1000) + 1000;
+  return Number.isFinite(ms) ? Math.min(ms, MAX_RETRY_WAIT_MS) : null;
+}
 
 async function post(path: string, body: unknown): Promise<Record<string, unknown>> {
   let lastError = "";
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    const res = await fetch(`${API_BASE}/${path}?key=${apiKey()}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/${path}?key=${apiKey()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      // Dropped connections happen on long uploads; treat them like a 503.
+      lastError = `Gemini request failed: ${err instanceof Error ? err.message : String(err)}`;
+      if (attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+        continue;
+      }
+      break;
+    }
     if (res.ok) return res.json();
     const text = await res.text();
     lastError = `Gemini API error ${res.status}: ${text.slice(0, 500)}`;
-    // 503 = overloaded, 429 = rate limited; both are transient.
+    // 503 = overloaded, 429 = rate limited / over quota; both are transient.
     if ((res.status === 503 || res.status === 429) && attempt < RETRY_DELAYS_MS.length) {
-      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      await new Promise((r) => setTimeout(r, retryAfterMs(text) ?? RETRY_DELAYS_MS[attempt]));
       continue;
     }
     break;
@@ -46,6 +66,10 @@ export type ExtractedObservation = {
   status: "Open" | "In Progress" | "Closed";
   owner: string;
   due_date: string;
+  /** 1-based page of the PDF the finding was read from. 0 when unknown. */
+  source_page: number;
+  /** Sentences copied verbatim from that page, used to highlight the source. */
+  source_quote: string;
 };
 
 export type ExtractionResult = {
@@ -80,8 +104,18 @@ const EXTRACTION_SCHEMA = {
           status: { type: "STRING", enum: ["Open", "In Progress", "Closed"] },
           owner: { type: "STRING", description: "Responsible owner if stated, else empty string" },
           due_date: { type: "STRING", description: "Target date if stated (YYYY-MM-DD), else empty string" },
+          source_page: {
+            type: "INTEGER",
+            description:
+              "1-based page number of THIS PDF file (count the pages of the file itself, ignore any page numbers printed on the page) where the observation is written. 0 if you cannot tell.",
+          },
+          source_quote: {
+            type: "STRING",
+            description:
+              "The passage on that page the observation was taken from, copied EXACTLY character for character from the document: same words, numbers, punctuation and casing, no paraphrasing, no ellipses, no added text. 1-3 consecutive sentences (or the full table row / bullet), 40-400 characters.",
+          },
         },
-        required: ["title", "description", "department", "risk", "recommendation", "status"],
+        required: ["title", "description", "department", "risk", "recommendation", "status", "source_page", "source_quote"],
       },
     },
   },
@@ -89,7 +123,11 @@ const EXTRACTION_SCHEMA = {
 };
 
 export async function extractObservations(pdf: Buffer): Promise<ExtractionResult> {
-  const prompt = `You are an internal audit analyst. Read this quarterly internal audit report and extract EVERY audit observation / finding / significant matter it contains. For each one capture the department or process it belongs to, its risk severity, the recommended action, management's response, and its current status. If severity is not explicit, judge it from the language and financial impact. If status is not explicit, use "Open". Also write an executive summary. Respond only with the JSON.`;
+  const prompt = `You are an internal audit analyst. Read this quarterly internal audit report and extract EVERY audit observation / finding / significant matter it contains. For each one capture the department or process it belongs to, its risk severity, the recommended action, management's response, and its current status. If severity is not explicit, judge it from the language and financial impact. If status is not explicit, use "Open".
+
+For every observation you must also cite where it came from: source_page is the page of this PDF file it appears on (count pages of the file from 1, ignore printed page labels), and source_quote is the exact text on that page the observation is based on, copied verbatim from the document. The quote is used to highlight the passage inside the original PDF, so it must match the document character for character. Never invent, translate, summarise or reflow a quote; if a finding is spread over a table, quote the row that carries the number you cited.
+
+Also write an executive summary. Respond only with the JSON.`;
   const data = await post(`models/${GEN_MODEL}:generateContent`, {
     contents: [
       {
@@ -111,6 +149,70 @@ export async function extractObservations(pdf: Buffer): Promise<ExtractionResult
   const parsed = JSON.parse(text) as ExtractionResult;
   if (!Array.isArray(parsed.observations)) throw new Error("Extraction result missing observations array.");
   return parsed;
+}
+
+export type LocatedSource = { index: number; source_page: number; source_quote: string };
+
+const LOCATE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    sources: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          index: { type: "INTEGER", description: "The index number of the observation, as given in the list" },
+          source_page: { type: "INTEGER", description: "1-based page of THIS PDF file where it appears, 0 if not found" },
+          source_quote: { type: "STRING", description: "Verbatim passage from that page, copied character for character" },
+        },
+        required: ["index", "source_page", "source_quote"],
+      },
+    },
+  },
+  required: ["sources"],
+};
+
+/**
+ * Finds where already-extracted observations came from inside their report.
+ * Used to backfill citations for observations extracted before this feature.
+ */
+export async function locateObservations(
+  pdf: Buffer,
+  observations: Array<{ index: number; title: string; description: string }>
+): Promise<LocatedSource[]> {
+  const list = observations
+    .map((o) => `${o.index}. ${o.title}${o.description ? ` — ${o.description}` : ""}`)
+    .join("\n");
+  const prompt = `This PDF is an internal audit report. Below is a numbered list of observations that were previously extracted from it. For each one, find the passage in the PDF it was taken from.
+
+Return, for every index in the list: source_page (the page of this PDF file, counting the file's pages from 1 and ignoring any page numbers printed on the page) and source_quote (the text on that page the observation came from, copied EXACTLY from the document, character for character: same words, numbers, punctuation and casing, no paraphrasing and no ellipses, 1-3 consecutive sentences or the full table row, 40-400 characters).
+
+The quote is used to highlight the passage inside the original PDF, so a quote that is not literally present in the document is worse than none: if you cannot find the passage, return source_page 0 and an empty source_quote.
+
+OBSERVATIONS:
+${list}
+
+Respond only with the JSON.`;
+  const data = await post(`models/${GEN_MODEL}:generateContent`, {
+    contents: [
+      {
+        parts: [
+          { inline_data: { mime_type: "application/pdf", data: pdf.toString("base64") } },
+          { text: prompt },
+        ],
+      },
+    ],
+    generationConfig: {
+      response_mime_type: "application/json",
+      response_schema: LOCATE_SCHEMA,
+      temperature: 0,
+    },
+  });
+  const candidates = data.candidates as Array<{ content?: { parts?: Array<{ text?: string }> } }> | undefined;
+  const text = candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  if (!text) throw new Error("Gemini returned no content for source lookup.");
+  const parsed = JSON.parse(text) as { sources?: LocatedSource[] };
+  return Array.isArray(parsed.sources) ? parsed.sources : [];
 }
 
 export async function embedTexts(texts: string[]): Promise<number[][]> {

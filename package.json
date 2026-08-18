@@ -3,16 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-pdf-worker.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-pdf-worker.mjs",
     "build": "next build",
     "start": "next start",
-    "setup": "tsx scripts/seed.ts"
+    "setup": "tsx scripts/seed.ts",
+    "backfill-sources": "tsx scripts/backfill-sources.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.2",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.8",
     "next": "16.3.0",
+    "pdfjs-dist": "^6.2.108",
     "postgres": "^3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
